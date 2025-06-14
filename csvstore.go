@@ -80,6 +80,85 @@ func (cs *CSVStore) CreateTable(tableName string, headers []string) error {
 	return nil
 }
 
+// QuerySortedRange retrieves a limited number of records from a table, sorted by a specific field.
+// sortBy can be "asc" for ascending or "desc" for descending order.
+// limit specifies the maximum number of records to return. If limit is larger than available records,
+// all records are returned. If limit is negative, an error is returned.
+func (cs *CSVStore) QuerySortedRange(
+	tableName string,
+	sortField string,
+	sortBy string,
+	limit int,
+) ([]CSVRecord, error) {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+
+	if limit < 0 {
+		return nil, fmt.Errorf("limit (%d) cannot be negative", limit)
+	}
+
+	if sortBy != "asc" && sortBy != "desc" {
+		return nil, fmt.Errorf("sortBy must be either 'asc' or 'desc', got '%s'", sortBy)
+	}
+
+	records, err := cs.loadTable(tableName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load table %s: %w", tableName, err)
+	}
+
+	if len(records) == 0 {
+		return []CSVRecord{}, nil
+	}
+
+	// Check if sortField exists in the records
+	if !slices.ContainsFunc(records, func(record CSVRecord) bool {
+		_, exists := record[sortField]
+		return exists
+	}) {
+		return nil, fmt.Errorf("sortField '%s' does not exist in table '%s'", sortField, tableName)
+	}
+
+	// If limit is 0, return empty slice
+	if limit == 0 {
+		return []CSVRecord{}, nil
+	}
+
+	// Sort records based on sortBy parameter
+	slices.SortFunc(records, func(a, b CSVRecord) int {
+		valA, okA := a[sortField]
+		valB, okB := b[sortField]
+
+		if !okA && !okB {
+			return 0 // Both missing, treat as equal
+		}
+		if !okA {
+			result := -1 // A is missing, B is not. A comes first (is "lesser").
+			if sortBy == "desc" {
+				result = -result
+			}
+			return result
+		}
+		if !okB {
+			result := 1 // B is missing, A is not. B comes first (A is "greater").
+			if sortBy == "desc" {
+				result = -result
+			}
+			return result
+		}
+		// Both fields exist, compare them using the existing numeric/string comparison logic
+		result := compareNumeric(valA, valB)
+		if sortBy == "desc" {
+			result = -result
+		}
+		return result
+	})
+
+	// Apply limit, ensuring it doesn't exceed record count
+	actualLimit := min(limit, len(records))
+
+	return records[:actualLimit], nil
+}
+
 // Query executes a query on the CSV table
 func (cs *CSVStore) Query(tableName string, conditions []QueryCondition) (*QueryResult, error) {
 	cs.mu.RLock()

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -501,5 +502,130 @@ func TestEdgeCases(t *testing.T) {
 			"Expected 0 records in deletedResult.Records for empty table delete, got %d",
 			len(deletedResult.Records),
 		)
+	}
+}
+
+func TestQuerySortedRange(t *testing.T) {
+	testDir := getTestDir()
+	store, err := NewCSVStore(testDir)
+	if err != nil {
+		t.Fatalf("Failed to create CSVStore: %v", err)
+	}
+	defer os.RemoveAll(testDir)
+
+	tableName := "range_test_items"
+	headers := []string{"id", "name", "value"} // "value" will be treated as string for sorting
+	err = store.CreateTable(tableName, headers)
+	if err != nil {
+		t.Fatalf("Failed to create table '%s': %v", tableName, err)
+	}
+
+	// Records for testing, unsorted by "value":
+	// ItemA: "100", ItemB: "200", ItemC: "150", ItemD: "250", ItemE: "050"
+	recordsToInsert := []CSVRecord{
+		{"id": "1", "name": "ItemA", "value": "100"},
+		{"id": "2", "name": "ItemB", "value": "200"},
+		{"id": "3", "name": "ItemC", "value": "150"},
+		{"id": "4", "name": "ItemD", "value": "250"},
+		{"id": "5", "name": "ItemE", "value": "050"},
+	}
+
+	for _, rec := range recordsToInsert {
+		_, err = store.Insert(tableName, rec)
+		if err != nil {
+			t.Fatalf("Failed to insert record into '%s': %v", tableName, err)
+		}
+	}
+
+	// Expected order (asc): ItemE ("050"), ItemA ("100"), ItemC ("150"), ItemB ("200"), ItemD ("250")
+	// Expected order (desc): ItemD ("250"), ItemB ("200"), ItemC ("150"), ItemA ("100"), ItemE ("050")
+
+	// Test Case 1: Ascending order, limit 2
+	// Expect ItemE ("050"), ItemA ("100")
+	res1, err1 := store.QuerySortedRange(tableName, "value", "asc", 2)
+	if err1 != nil {
+		t.Fatalf("Test Case 1 (Asc Limit 2): Expected no error, got %v", err1)
+	}
+	if len(res1) != 2 {
+		t.Errorf("Test Case 1 (Asc Limit 2): Expected 2 records, got %d", len(res1))
+	} else {
+		if res1[0]["name"] != "ItemE" || res1[1]["name"] != "ItemA" {
+			t.Errorf("Test Case 1 (Asc Limit 2): Records not in expected order. Got: %v, %v", res1[0]["name"], res1[1]["name"])
+		}
+	}
+
+	// Test Case 2: Descending order, limit 3
+	// Expect ItemD ("250"), ItemB ("200"), ItemC ("150")
+	res2, err2 := store.QuerySortedRange(tableName, "value", "desc", 3)
+	if err2 != nil {
+		t.Fatalf("Test Case 2 (Desc Limit 3): Expected no error, got %v", err2)
+	}
+	if len(res2) != 3 {
+		t.Errorf("Test Case 2 (Desc Limit 3): Expected 3 records, got %d", len(res2))
+	} else {
+		if res2[0]["name"] != "ItemD" || res2[1]["name"] != "ItemB" || res2[2]["name"] != "ItemC" {
+			t.Errorf("Test Case 2 (Desc Limit 3): Records not in expected order. Got: %v, %v, %v", res2[0]["name"], res2[1]["name"], res2[2]["name"])
+		}
+	}
+
+	// Test Case 3: Ascending order, limit 0
+	res3, err3 := store.QuerySortedRange(tableName, "value", "asc", 0)
+	if err3 != nil {
+		t.Fatalf("Test Case 3 (Asc Limit 0): Expected no error, got %v", err3)
+	}
+	if len(res3) != 0 {
+		t.Errorf("Test Case 3 (Asc Limit 0): Expected 0 records, got %d", len(res3))
+	}
+
+	// Test Case 4: Ascending order, limit > total (e.g., 10)
+	// Expect all 5 records in ascending order
+	res4, err4 := store.QuerySortedRange(tableName, "value", "asc", 10)
+	if err4 != nil {
+		t.Fatalf("Test Case 4 (Asc Limit > Total): Expected no error, got %v", err4)
+	}
+	if len(res4) != 5 {
+		t.Errorf("Test Case 4 (Asc Limit > Total): Expected 5 records, got %d", len(res4))
+	} else {
+		if res4[0]["name"] != "ItemE" || res4[1]["name"] != "ItemA" || res4[2]["name"] != "ItemC" || res4[3]["name"] != "ItemB" || res4[4]["name"] != "ItemD" {
+			t.Errorf("Test Case 4 (Asc Limit > Total): Records not in expected order. Got: %v, %v, %v, %v, %v", res4[0]["name"], res4[1]["name"], res4[2]["name"], res4[3]["name"], res4[4]["name"])
+		}
+	}
+
+	// Test Case 5: Non-existent table
+	_, err5 := store.QuerySortedRange("fake_table", "value", "asc", 2)
+	if err5 == nil {
+		t.Error("Test Case 5 (Non-existent table): Expected error, got nil")
+	}
+
+	// Test Case 6: Invalid sort column
+	_, err6 := store.QuerySortedRange(tableName, "fake_column", "asc", 2)
+	if err6 == nil {
+		t.Error("Test Case 6 (Invalid column): Expected error, got nil")
+	}
+
+	// Test Case 7: Empty table
+	emptyTableName := "empty_range_table"
+	err = store.CreateTable(emptyTableName, headers)
+	if err != nil {
+		t.Fatalf("Test Case 7 (Empty Table): Failed to create table '%s': %v", emptyTableName, err)
+	}
+	res7, err7 := store.QuerySortedRange(emptyTableName, "value", "asc", 2)
+	if err7 != nil {
+		t.Fatalf("Test Case 7 (Empty Table): Expected no error, got %v", err7)
+	}
+	if len(res7) != 0 {
+		t.Errorf("Test Case 7 (Empty Table): Expected 0 records, got %d", len(res7))
+	}
+
+	// Test Case 8: Invalid sortOrder string
+	_, err8 := store.QuerySortedRange(tableName, "value", "invalid_sort_order", 2)
+	if err8 == nil {
+		t.Error(
+			"Test Case 8 (Invalid sortOrder): Expected error for invalid sortOrder string, got nil",
+		)
+	} else {
+		if !strings.Contains(err8.Error(), "sortBy must be either 'asc' or 'desc'") {
+			t.Errorf("Test Case 8 (Invalid sortOrder): Expected error about sortOrder, got %v", err8)
+		}
 	}
 }
