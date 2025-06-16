@@ -51,6 +51,16 @@ func (cs *CSVStore) getTablePath(tableName string) string {
 	return filepath.Join(cs.basePath, tableName+".csv")
 }
 
+// CheckTableExists checks if a table exists
+func (cs *CSVStore) CheckTableExists(tableName string) bool {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+
+	tablePath := cs.getTablePath(tableName)
+	_, err := os.Stat(tablePath)
+	return !os.IsNotExist(err)
+}
+
 // CreateTable creates a new CSV table with headers
 func (cs *CSVStore) CreateTable(tableName string, headers []string) error {
 	cs.mu.Lock()

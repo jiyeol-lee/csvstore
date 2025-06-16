@@ -51,6 +51,39 @@ func TestGetTablePath(t *testing.T) {
 	}
 }
 
+func TestCheckTableExists(t *testing.T) {
+	testDir := getTestDir()
+	store, err := NewCSVStore(testDir)
+	if err != nil {
+		t.Fatalf("Failed to create CSVStore: %v", err)
+	}
+	defer os.RemoveAll(testDir)
+
+	tableName := "existing_table"
+	tablePath := store.GetTablePath(tableName)
+
+	// Initially, the table should not exist
+	if store.CheckTableExists(tableName) {
+		t.Error("Expected table to not exist initially")
+	}
+
+	// Create the table
+	err = store.CreateTable(tableName, []string{"id", "name"})
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+
+	// Now it should exist
+	if !store.CheckTableExists(tableName) {
+		t.Error("Expected table to exist after creation")
+	}
+
+	// Verify the file exists on disk
+	if _, err := os.Stat(tablePath); os.IsNotExist(err) {
+		t.Errorf("Table file %s was not created", tablePath)
+	}
+}
+
 func TestCreateTable(t *testing.T) {
 	testDir := getTestDir()
 	store, err := NewCSVStore(testDir)
