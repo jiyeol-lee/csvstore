@@ -99,7 +99,7 @@ func (cs *CSVStore) QuerySortedRange(
 	sortField string,
 	sortBy string,
 	limit int,
-) ([]CSVRecord, error) {
+) (*QueryResult, error) {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
 
@@ -117,7 +117,10 @@ func (cs *CSVStore) QuerySortedRange(
 	}
 
 	if len(records) == 0 {
-		return []CSVRecord{}, nil
+		return &QueryResult{
+			Records: []CSVRecord{},
+			Count:   0,
+		}, nil
 	}
 
 	// Check if sortField exists in the records
@@ -130,7 +133,10 @@ func (cs *CSVStore) QuerySortedRange(
 
 	// If limit is 0, return empty slice
 	if limit == 0 {
-		return []CSVRecord{}, nil
+		return &QueryResult{
+			Records: []CSVRecord{},
+			Count:   0,
+		}, nil
 	}
 
 	// Sort records based on sortBy parameter
@@ -166,7 +172,10 @@ func (cs *CSVStore) QuerySortedRange(
 	// Apply limit, ensuring it doesn't exceed record count
 	actualLimit := min(limit, len(records))
 
-	return records[:actualLimit], nil
+	return &QueryResult{
+		Records: records[:actualLimit],
+		Count:   actualLimit,
+	}, nil
 }
 
 // Query executes a query on the CSV table
